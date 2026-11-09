@@ -1,0 +1,3 @@
+[submodule "spiking_network_dynamics"]
+	path = spiking_network_dynamics
+	url = https://github.com/yzerlaut/spiking_network_dynamics.git
