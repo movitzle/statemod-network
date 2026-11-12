@@ -1,0 +1,26 @@
+[project]
+name = "statemod-network"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "matplotlib>=3.11.2",
+    "scipy>=1.18.1",
+    "spiking-network-dynamics",
+]
+
+[project.scripts]
+statemod-network = "statemod_network:main"
+
+[build-system]
+requires = ["uv_build>=0.13.7,<0.14.0"]
+build-backend = "uv_build"
+
+[tool.uv.workspace]
+members = [
+    "spiking_network_dynamics",
+]
+
+[tool.uv.sources]
+spiking-network-dynamics = { workspace = true, editable = true }
