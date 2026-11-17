@@ -4,22 +4,20 @@ we start from the Layer423 network that we modifies
 from TcL5_ntwk import *
 from TcL423_ntwk import Model as Model2
 
-# Model.update(Model2)
+# Model['populations'].update(Model2['populations'])
+# Model['projections'].update(Model2['projections'])
 
 # update afferent freqs params
 
+Model['tstop'] = 6000*ms
+t = su.time_array(Model)
+Model['afferents']['BgExc']['rate'] = su.varying_levels_function(\
+                                t, [0, 20]*Hz, [0, 300]*ms, 300*ms)
+Model['afferents']['ModExc']['rate'] = su.varying_levels_function(\
+                        t, [0, 8, 20]*Hz, [0, 2e3, 4e3]*ms, 300*ms)
 
-# Model['REC_POPS'] = ['TcExc', 'ReInh', 'L5Exc', 'L423Exc', 'L423Inh', 'DsInh']
-# Model['AFF_POPS'] = ['BgExc', 'ModExc']
 
-Model['tstop'] = 6e3
-t = np.arange(int(Model['tstop']/Model['dt']))*Model['dt']
-Model['Farray_BgExc'] = su.varying_levels_function(\
-                                                t, [0, 20], [0, 300], 300)
-Model['Farray_ModExc'] = su.varying_levels_function(\
-                                        t, [0, 8, 20], [0, 2e3, 4e3], 300)
 
-        
 if __name__=='__main__':
 
     

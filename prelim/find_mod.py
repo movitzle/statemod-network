@@ -3,14 +3,15 @@
 """
 from bTcL5_ntwk import *
 
-Model['tstop'] = 1200.
-Model['Farray_BgExc'] = su.varying_levels_function(\
-                                                        t, [0, 20], [0, 300], 200)
+Model['tstop'] = 1200*ms
+t = su.time_array(Model)
+Model['afferents']['BgExc']['rate'] = su.varying_levels_function(\
+                                    t, [0, 20]*Hz, [0, 300]*ms, 200*ms)
 
 for mod in np.linspace(2, 30, 10):
 
-    Model['Farray_ModExc'] = su.varying_levels_function(\
-                                                        t, [0, mod], [0, 600], 200)
+    Model['afferents']['ModExc']['rate'] = su.varying_levels_function(\
+                                    t, [0, mod]*Hz, [0, 600]*ms, 200*ms)
 
     su.simulation(Model, with_Vm=3, verbose=False,
 

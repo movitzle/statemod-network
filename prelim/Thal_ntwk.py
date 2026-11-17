@@ -5,6 +5,7 @@ import sys
 
 import numpy as np
 import matplotlib.pylab as plt
+from brian2 import ms, mV, nS, pF, pA, Hz
 import snd_utils as su
 
 ################################################################
@@ -12,61 +13,49 @@ import snd_utils as su
 ## ------------- with recurrent connections ----------------- ##
 ################################################################
 
+# cellular properties shared by all populations (AdExp)
+# (Vcut = VT+5*DeltaT, the spike detection of ntwk)
+CELL = dict(gL=10*nS, C=200*pF, tref=5*ms, EL=-70*mV, VT=-50*mV, Vr=-60*mV,
+            DeltaT=2.5*mV, Vcut=-37.5*mV)
+
 Model = {
-    ## ---------------------------------------------------------------------------------
-    ## UNIT SYSTEM is : ms, mV, pF, nS, pA, Hz (arbitrary and unconsistent, so see code)
-    ## ---------------------------------------------------------------------------------
-    # numbers of neurons in population
-    'N_TcExc':500, 
-    'N_ReInh':500, 
-    'N_BgExc':200,
-    'N_ModExc':1000,
-    # synaptic weights
-    'Q_TcExc_ReInh':5., 
-    'Q_ReInh_TcExc':15., 
-    'Q_ReInh_ReInh':15., 
-    'Q_BgExc_TcExc':5.,
-    'Q_BgExc_ReInh':5.,
-    'Q_ModExc_ReInh':5.,
-    'Q_ModExc_TcExc':5.,
-    # synaptic time constants
-    'Tsyn_Exc':5., 
-    'Tsyn_Inh':5., 
-    # synaptic reversal potentials
-    'Erev_Exc':0., 
-    'Erev_Inh':-80., 
-    # connectivity parameters
-    # 'p_TcExc_ReInh':0.05, 
-    'p_ReInh_ReInh':0.15, 
-    'p_ReInh_TcExc':0.05, 
-    'p_BgExc_ReInh':0.02, 
-    'p_BgExc_TcExc':0.2, 
-    'p_ModExc_ReInh':0.1, 
-    # 'p_ModExc_TcExc':0.15, 
-    # simulation parameters
-    'dt':0.2, 'tstop': 3e3, 'SEED':3, # low by default, see later
-    ## ---------------------------------------------------------------------------------
-    # === cellular properties (based on AdExp), population by population ===
-    # --> Thalamo-Cortical population (Exc)
-    'TcExc_Gl':10., 'TcExc_Cm':200.,'TcExc_Trefrac':5.,
-    'TcExc_El':-70., 'TcExc_Vthre':-50., 'TcExc_Vreset':-60., 'TcExc_deltaV':2.5,
-    'TcExc_a':60., 'TcExc_b': 70, 'TcExc_tauw':200.,
-    # --> Reticular population (Inh)
-    'ReInh_Gl':10., 'ReInh_Cm':200.,'ReInh_Trefrac':5.,
-    'ReInh_El':-70., 'ReInh_Vthre':-50., 'ReInh_Vreset':-60., 'ReInh_deltaV':2.5,
-    'ReInh_a':0., 'ReInh_b': 0., 'ReInh_tauw':200.,
-    #
-    'REC_POPS':['TcExc', 'ReInh'],
-    'AFF_POPS':['BgExc', 'ModExc'],
+    'dt': 0.2*ms, 'tstop': 3000*ms, 'seed': 3,
+
+    # synaptic channels
+    'channels': {'AMPA': dict(kind='exp', E=0*mV, tau=5*ms),
+                 'GABA': dict(kind='exp', E=-80*mV, tau=5*ms)},
+
+    'populations': {
+        # Thalamo-Cortical population (Exc)
+        'TcExc': dict(N=500, kind='AdExp',
+                      params=dict(CELL, a=60*nS, b=70*pA, tauw=200*ms)),
+        # Reticular population (Inh), no adaptation
+        'ReInh': dict(N=500, kind='EIF', params=dict(CELL)),
+    },
+
+    # independent Poisson drives, rates set below
+    'afferents': {'BgExc': dict(N=200),
+                  'ModExc': dict(N=1000)},
+
+    # fixed indegree (= int(p*N_pre) of the ntwk connection probability p)
+    'projections': {
+        # ('TcExc', 'ReInh'): dict(channel='AMPA', w=5*nS, indegree=25),
+        ('ReInh', 'TcExc'): dict(channel='GABA', w=15*nS, indegree=25),
+        ('ReInh', 'ReInh'): dict(channel='GABA', w=15*nS, indegree=75),
+        ('BgExc', 'TcExc'): dict(channel='AMPA', w=5*nS, indegree=40),
+        ('BgExc', 'ReInh'): dict(channel='AMPA', w=5*nS, indegree=4),
+        ('ModExc', 'ReInh'): dict(channel='AMPA', w=5*nS, indegree=100),
+        # ('ModExc', 'TcExc'): dict(channel='AMPA', w=5*nS, indegree=150),
+    },
 }
 
-t = np.arange(int(Model['tstop']/Model['dt']))*Model['dt']
-Model['Farray_BgExc'] = su.varying_levels_function(\
-                                                    t, [0, 20], [0, 300], 200)
+t = su.time_array(Model)
+Model['afferents']['BgExc']['rate'] = su.varying_levels_function(\
+                                    t, [0, 20]*Hz, [0, 300]*ms, 200*ms)
 
-Model['Farray_ModExc'] = su.varying_levels_function(\
-                                    t, [0, 5, 10], [0, 1e3, 2e3], 200)
-                                    # t, np.arange(10)*2, 1e3+np.arange(10)*.5e3, 200)
+Model['afferents']['ModExc']['rate'] = su.varying_levels_function(\
+                                    t, [0, 5, 10]*Hz, [0, 1e3, 2e3]*ms, 200*ms)
+                                    # t, np.arange(10)*2*Hz, (1e3+np.arange(10)*.5e3)*ms, 200*ms)
 
 
 if __name__=='__main__':

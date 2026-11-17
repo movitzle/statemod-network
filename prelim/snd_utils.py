@@ -1,12 +1,15 @@
 """
-Helpers to run the `ntwk`-style flat models of this repository with
-`spiking_network_dynamics` (snd).
+Helpers to run the models of this repository with `spiking_network_dynamics`
+(snd) and plot them.
 
-The models are still written as flat dictionaries in the `ntwk` unit system
-(ms, mV, pF, nS, pA, Hz), they are converted to `snd` model descriptions with
-`snd.legacy.from_ntwk` (see `to_snd`).
+The models are `snd` model descriptions (nested dictionaries with brian2
+units, see `snd.model`). Old `ntwk`-style flat dictionaries (ms, mV, pF, nS,
+pA, Hz) are still accepted, they are converted with `snd.legacy.from_ntwk`.
 
-    Model = {'N_TcExc':500, ..., 'REC_POPS':[...], 'AFF_POPS':[...]}
+    Model = {'dt': 0.1*ms, 'tstop': 4000*ms, 'populations': {...}, ...}
+    t = time_array(Model)
+    Model['afferents']['BgExc']['rate'] = varying_levels_function(
+                                t, [0, 20]*Hz, [0, 300]*ms, 200*ms)
     data = simulation(Model, with_Vm=3, filename='data/TcL5.snd.h5')
     data = load('data/TcL5.snd.h5')
     t, rate = population_rate(data, 'TcExc')
@@ -22,30 +25,34 @@ import matplotlib.pylab as plt
 _root = pathlib.Path(__file__).resolve().parent
 sys.path.append(str(_root / 'spiking_network_dynamics'))
 import snd
-from brian2 import ms, mV, Hz
+from brian2 import ms, mV, nS, pF, pA, Hz
 
 load = snd.io.load
 
 
 # ------------------------------------------------------------------ #
-#    stimulation waveforms (unitless, in the ntwk unit system)
+#    stimulation waveforms (afferent rates, sampled every dt)
 # ------------------------------------------------------------------ #
 
 def time_array(Model):
-    """ time array (ms) of a ntwk model """
+    """ time array (with units) of a model, sampled every dt """
     return np.arange(int(Model['tstop']/Model['dt']))*Model['dt']
 
 
-def varying_levels_function(t, levels, onsets, smoothing=100):
+def varying_levels_function(t, levels, onsets, smoothing=100*ms):
     """
-    piecewise constant signal (taking `levels[k]` after `onsets[k]`),
-    smoothed with a gaussian filter of width `smoothing` (same unit as t)
+    piecewise constant rate (taking `levels[k]` after `onsets[k]`),
+    smoothed with a gaussian filter of width `smoothing`
+
+        rate = varying_levels_function(t, [0, 20]*Hz, [0, 300]*ms, 200*ms)
+
     -- port of ntwk.stim.waveform_library.varying_levels_function
     """
+    t = np.asarray(t/ms)
     signal = 0*t
     for onset, level in zip(onsets, levels):
-        signal[t > onset] = level
-    return gaussian_filter1d(signal, int(smoothing/(t[1]-t[0])))
+        signal[t > float(onset/ms)] = float(level/Hz)
+    return gaussian_filter1d(signal, int(float(smoothing/ms)/(t[1]-t[0])))*Hz
 
 
 # ------------------------------------------------------------------ #
@@ -54,11 +61,15 @@ def varying_levels_function(t, levels, onsets, smoothing=100):
 
 def to_snd(Model, with_Vm=0):
     """
-    snd model description from a ntwk flat model
+    snd model description to simulate (a copy of Model, converted with
+    snd.legacy.from_ntwk if it is an old ntwk flat dictionary)
     (with_Vm: number of neurons per population whose V is recorded)
     """
-    M = snd.legacy.from_ntwk(Model)
-    M['order'] = list(Model['REC_POPS'])  # population order, for plots
+    if 'populations' in Model:
+        M = dict(Model)
+    else:
+        M = snd.legacy.from_ntwk(Model)
+        M['order'] = list(Model['REC_POPS'])  # population order, for plots
     if with_Vm:
         M['record'] = {pop: dict(spikes=True, rate=True,
                                  variables=['V'], record=with_Vm)
@@ -68,7 +79,7 @@ def to_snd(Model, with_Vm=0):
 
 def simulation(Model, filename=None, with_Vm=0, verbose=False):
     """
-    build and run the network of a ntwk flat model with snd (as
+    build and run the network of a model with snd (as
     ntwk.quick_run.simulation), returns the data (and saves it in `filename`)
     """
     M = to_snd(Model, with_Vm=with_Vm)

@@ -2,40 +2,32 @@
 we start from the Layer423 network that we modifies
 """
 from Layer423_ntwk import *
+from brian2 import ms, mV, nS, pF, pA, Hz
 
-# change afferent network for TC network
-
-Model['N_TcExc'] = Model['N_AffExc'] # we keep AffExc here
-
-keys = list(Model.keys()).copy()
-for key in keys:
-    if len(key.split('L423'))==2 and len(key.split('Aff'))==2:
-        Model[key.replace('Aff', 'Tc')] = Model[key]
-        Model.pop(key, None)
+# change afferent network for TC network:
+# TcExc (as many neurons as AffExc) replaces AffExc as the input of L423
+for post in ['L423Exc', 'L423Inh']:
+    Model['projections'][('TcExc', post)] = \
+            Model['projections'].pop(('AffExc', post))
 
 # connect Aff to Thal
-Model['Q_AffExc_TcExc'] = 4.
-Model['p_AffExc_TcExc'] = 0.05
+Model['projections'][('AffExc', 'TcExc')] = dict(channel='AMPA', w=4*nS, indegree=50)
 
-# Give Neuronal properties to TcExc neurons
-params = {\
-    # --> Excitatory population (TcExc, recurrent excitation)
-    'TcExc_Gl':10., 'TcExc_Cm':200.,'TcExc_Trefrac':5.,
-    'TcExc_El':-70., 'TcExc_Vthre':-50., 'TcExc_Vreset':-70.,
-    'TcExc_a':0, 'TcExc_b': 0, 'TcExc_tauw':1e3, 'TcExc_deltaV':0,
-}
+# Give Neuronal properties to TcExc neurons (first population)
+Model['populations'] = {
+    # --> Excitatory population (TcExc, LIF without adaptation)
+    'TcExc': dict(N=Model['afferents']['AffExc']['N'], kind='LIF', params=dict(
+        gL=10*nS, C=200*pF, tref=5*ms, EL=-70*mV, VT=-50*mV, Vr=-70*mV)),
+    **Model['populations']}
 
-Model['tstop'] = 3000.
-Model.update(params)
+Model['tstop'] = 3000*ms
 
 # update afferent freqs params
-t = np.arange(int(Model['tstop']/Model['dt']))*Model['dt']
-Model['Farray_AffExc'] = \
+t = su.time_array(Model)
+Model['afferents']['AffExc']['rate'] = \
         su.varying_levels_function(\
-                    t, [0, 2.5, 10.], [0, 300, 2000], 200)
+                    t, [0, 2.5, 10.]*Hz, [0, 300, 2000]*ms, 200*ms)
 
-Model['REC_POPS'] = ['TcExc', 'L423Exc', 'L423Inh', 'DsInh']
-Model['AFF_POPS'] = ['AffExc']
 
 if __name__=='__main__':
 

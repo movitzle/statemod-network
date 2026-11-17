@@ -5,6 +5,7 @@ import sys
 
 import numpy as np
 import matplotlib.pylab as plt
+from brian2 import ms, mV, nS, pF, pA, Hz
 import snd_utils as su
 
 ################################################################
@@ -12,76 +13,56 @@ import snd_utils as su
 ## ------------- with recurrent connections ----------------- ##
 ################################################################
 
+# cellular properties shared by all populations (AdExp)
+# (Vcut = VT+5*DeltaT, the spike detection of ntwk)
+CELL = dict(gL=10*nS, C=200*pF, tref=3*ms, EL=-70*mV, VT=-50*mV, Vr=-60*mV,
+            DeltaT=2.5*mV, Vcut=-37.5*mV)
+
 Model = {
-    ## ---------------------------------------------------------------------------------
-    ## UNIT SYSTEM is : ms, mV, pF, nS, pA, Hz (arbitrary and unconsistent, so see code)
-    ## ---------------------------------------------------------------------------------
-    # numbers of neurons in population
-    'N_TcExc':500, 
-    'N_ReInh':500, 
-    'N_L5Exc':1000, 
-    'N_L5Inh':200, 
-    'N_BgExc':100,
-    'N_ModExc':500,
-    # synaptic weights
-    'Q_TcExc_L5Exc':8., 
-    'Q_L5Inh_L5Exc':10., 
-    'Q_TcExc_ReInh':5., 
-    'Q_ReInh_TcExc':15., 
-    'Q_ReInh_ReInh':15., 
-    'Q_L5Exc_TcExc':5., 
-    'Q_BgExc_TcExc':10.,
-    'Q_ModExc_L5Inh':5.,
-    'Q_ModExc_ReInh':5.,
-    'Q_ModExc_TcExc':5.,
-    'Q_ModExc_L5Inh':5.,
-    # synaptic time constants
-    'Tsyn_Exc':5., 
-    'Tsyn_Inh':5., 
-    # synaptic reversal potentials
-    'Erev_Exc':0., 
-    'Erev_Inh':-80., 
-    # connectivity parameters
-    'p_L5Inh_L5Exc':0.1, 
-    'p_TcExc_L5Exc':0.02, 
-    'p_TcExc_ReInh':0.02, 
-    'p_L5Exc_TcExc':0.016, 
-    'p_ReInh_ReInh':0.04, 
-    'p_ReInh_TcExc':0.15, 
-    'p_BgExc_TcExc':0.1, 
-    'p_ModExc_L5Inh':0.2, 
-    'p_ModExc_ReInh':0.05, 
-    'p_ModExc_TcExc':0.15, 
-    # simulation parameters
-    'dt':0.1, 'tstop': 4000., 'SEED':3, # low by default, see later
-    ## ---------------------------------------------------------------------------------
-    # === cellular properties (based on AdExp), population by population ===
-    # --> Thalamo-Cortical population (Exc)
-    'TcExc_Gl':10., 'TcExc_Cm':200.,'TcExc_Trefrac':3.,
-    'TcExc_El':-70., 'TcExc_Vthre':-50., 'TcExc_Vreset':-60., 'TcExc_deltaV':2.5,
-    'TcExc_a':60., 'TcExc_b': 70, 'TcExc_tauw':200.,
-    # --> Reticular population (Inh)
-    'ReInh_Gl':10., 'ReInh_Cm':200.,'ReInh_Trefrac':3.,
-    'ReInh_El':-70., 'ReInh_Vthre':-50., 'ReInh_Vreset':-60., 'ReInh_deltaV':2.5,
-    'ReInh_a':50., 'ReInh_b': 30, 'ReInh_tauw':200.,
-    # --> Layer 4 cortical population (Exc)
-    'L5Exc_Gl':10., 'L5Exc_Cm':200.,'L5Exc_Trefrac':3.,
-    'L5Exc_El':-70., 'L5Exc_Vthre':-50., 'L5Exc_Vreset':-60., 'L5Exc_deltaV':2.5,
-    'L5Exc_a':0., 'L5Exc_b': 100, 'L5Exc_tauw':200.,
-    #
-    'L5Inh_Gl':10., 'L5Inh_Cm':200.,'L5Inh_Trefrac':3.,
-    'L5Inh_El':-70., 'L5Inh_Vthre':-50., 'L5Inh_Vreset':-60., 'L5Inh_deltaV':2.5,
-    'L5Inh_a':0, 'L5Inh_b': 0, 'L5Inh_tauw':200.,
-    #
-    'REC_POPS':['TcExc', 'ReInh', 'L5Exc', 'L5Inh'],
-    'AFF_POPS':['BgExc', 'ModExc'],
+    'dt': 0.1*ms, 'tstop': 4000*ms, 'seed': 3,
+
+    # synaptic channels
+    'channels': {'AMPA': dict(kind='exp', E=0*mV, tau=5*ms),
+                 'GABA': dict(kind='exp', E=-80*mV, tau=5*ms)},
+
+    'populations': {
+        # Thalamo-Cortical population (Exc)
+        'TcExc': dict(N=500, kind='AdExp',
+                      params=dict(CELL, a=60*nS, b=70*pA, tauw=200*ms)),
+        # Reticular population (Inh)
+        'ReInh': dict(N=500, kind='AdExp',
+                      params=dict(CELL, a=50*nS, b=30*pA, tauw=200*ms)),
+        # Layer 5 cortical population (Exc)
+        'L5Exc': dict(N=1000, kind='AdExp',
+                      params=dict(CELL, a=0*nS, b=100*pA, tauw=200*ms)),
+        # Layer 5 cortical population (Inh)
+        'L5Inh': dict(N=200, kind='EIF', params=dict(CELL)),
+    },
+
+    # independent Poisson drives, rates set below
+    'afferents': {'BgExc': dict(N=100),
+                  'ModExc': dict(N=500)},
+
+    # fixed indegree (= int(p*N_pre) of the ntwk connection probability p)
+    'projections': {
+        ('TcExc', 'ReInh'): dict(channel='AMPA', w=5*nS, indegree=10),
+        ('TcExc', 'L5Exc'): dict(channel='AMPA', w=8*nS, indegree=10),
+        ('ReInh', 'TcExc'): dict(channel='GABA', w=15*nS, indegree=75),
+        ('ReInh', 'ReInh'): dict(channel='GABA', w=15*nS, indegree=20),
+        ('L5Exc', 'TcExc'): dict(channel='AMPA', w=5*nS, indegree=16),
+        ('L5Inh', 'L5Exc'): dict(channel='GABA', w=10*nS, indegree=20),
+        ('BgExc', 'TcExc'): dict(channel='AMPA', w=10*nS, indegree=10),
+        ('ModExc', 'TcExc'): dict(channel='AMPA', w=5*nS, indegree=75),
+        ('ModExc', 'ReInh'): dict(channel='AMPA', w=5*nS, indegree=25),
+        ('ModExc', 'L5Inh'): dict(channel='AMPA', w=5*nS, indegree=100),
+    },
 }
 
-t = np.arange(int(Model['tstop']/Model['dt']))*Model['dt']
-Model['Farray_BgExc'] = su.varying_levels_function(\
-                                                        t, [0, 20], [0, 300], 200)
-Model['Farray_ModExc'] = su.varying_levels_function(\
-                                                        t, [0, 2], [0, 2e3], 200)
+t = su.time_array(Model)
+Model['afferents']['BgExc']['rate'] = su.varying_levels_function(\
+                                    t, [0, 20]*Hz, [0, 300]*ms, 200*ms)
+Model['afferents']['ModExc']['rate'] = su.varying_levels_function(\
+                                    t, [0, 2]*Hz, [0, 2e3]*ms, 200*ms)
 
 
 if __name__=='__main__':

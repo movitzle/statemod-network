@@ -5,6 +5,7 @@ import sys
 
 import numpy as np
 import matplotlib.pylab as plt
+from brian2 import ms, mV, nS, pF, pA, Hz
 import snd_utils as su
 
 ################################################################
@@ -12,44 +13,43 @@ import snd_utils as su
 ## ------------- with recurrent connections ----------------- ##
 ################################################################
 
+# cellular properties shared by all populations (AdExp)
+# (Vcut = VT+5*DeltaT, the spike detection of ntwk)
+CELL = dict(gL=10*nS, C=200*pF, tref=3*ms, EL=-60*mV, VT=-50*mV, Vr=-60*mV,
+            DeltaT=2.5*mV, Vcut=-37.5*mV)
+
 Model = {
-    ## ---------------------------------------------------------------------------------
-    ## UNIT SYSTEM is : ms, mV, pF, nS, pA, Hz (arbitrary and unconsistent, so see code)
-    ## ---------------------------------------------------------------------------------
-    # numbers of neurons in population
-    'N_TcExc':100, 
-    'N_ReInh':100, 
-    'N_AffExc':100,
-    # synaptic weights
-    'Q_TcExc_ReInh':30., 
-    'Q_ReInh_TcExc':30., 
-    'Q_ReInh_ReInh':30., 
-    'Q_AffExc_TcExc':30.,
-    # synaptic time constants
-    'Tsyn_Exc':5., 
-    'Tsyn_Inh':10., 
-    # synaptic reversal potentials
-    'Erev_Exc':0., 
-    'Erev_Inh':-80., 
-    # connectivity parameters
-    'p_TcExc_ReInh':0.02, 
-    'p_ReInh_ReInh':0.08, 
-    'p_ReInh_TcExc':0.08, 
-    'p_AffExc_TcExc':0.02, 
-    # simulation parameters
-    'dt':0.1, 'tstop': 2000., 'SEED':3, # low by default, see later
-    ## ---------------------------------------------------------------------------------
-    # === cellular properties (based on AdExp), population by population ===
-    # --> Thalamo-Cortical population (Exc)
-    'TcExc_Gl':10., 'TcExc_Cm':200.,'TcExc_Trefrac':3.,
-    'TcExc_El':-60., 'TcExc_Vthre':-50., 'TcExc_Vreset':-60., 'TcExc_deltaV':2.5,
-    'TcExc_a':40., 'TcExc_b': 0, 'TcExc_tauw':600.,
-    # --> Reticular population (Inh)
-    'ReInh_Gl':10., 'ReInh_Cm':200.,'ReInh_Trefrac':3.,
-    'ReInh_El':-60., 'ReInh_Vthre':-50., 'ReInh_Vreset':-60., 'ReInh_deltaV':2.5,
-    'ReInh_a':80., 'ReInh_b': 30, 'ReInh_tauw':600.,
-    'F_AffExc':1,
+    'dt': 0.1*ms, 'tstop': 2000*ms, 'seed': 3,
+
+    # synaptic channels
+    'channels': {'AMPA': dict(kind='exp', E=0*mV, tau=5*ms),
+                 'GABA': dict(kind='exp', E=-80*mV, tau=10*ms)},
+
+    'populations': {
+        # Thalamo-Cortical population (Exc)
+        'TcExc': dict(N=100, kind='AdExp',
+                      params=dict(CELL, a=40*nS, b=0*pA, tauw=600*ms)),
+        # Reticular population (Inh)
+        'ReInh': dict(N=100, kind='AdExp',
+                      params=dict(CELL, a=80*nS, b=30*pA, tauw=600*ms)),
+    },
+
+    # independent Poisson drive, rate set below
+    'afferents': {'AffExc': dict(N=100)},
+
+    # fixed indegree (= int(p*N_pre) of the ntwk connection probability p)
+    'projections': {
+        ('TcExc', 'ReInh'): dict(channel='AMPA', w=30*nS, indegree=2),
+        ('ReInh', 'TcExc'): dict(channel='GABA', w=30*nS, indegree=8),
+        ('ReInh', 'ReInh'): dict(channel='GABA', w=30*nS, indegree=8),
+        # afferent excitation (AffExc) onto thalamic excitation (TcExc) only
+        ('AffExc', 'TcExc'): dict(channel='AMPA', w=30*nS, indegree=2),
+    },
 }
+
+# afferent rate: 50 Hz during the first 100 ms, then 1 Hz
+t = su.time_array(Model)
+Model['afferents']['AffExc']['rate'] = np.where(t < 100*ms, 50, 1)*Hz
 
 
 if sys.argv[-1]=='plot':
@@ -65,14 +65,7 @@ if sys.argv[-1]=='plot':
                                Vm_args=dict(lw=0.3, subsampling=4))
     plt.show()
 else:
-    # afferent excitation (AffExc) onto thalamic excitation (TcExc) only
-    SimModel = dict(Model, REC_POPS=['TcExc', 'ReInh'], AFF_POPS=['AffExc'])
-    t_array = su.time_array(Model)
-    f_array = 0.*t_array+Model['F_AffExc']
-    f_array[t_array<100] = 50
-    SimModel['Farray_AffExc'] = f_array
-
-    su.simulation(SimModel, with_Vm=10, verbose=True,
+    su.simulation(Model, with_Vm=10, verbose=True,
                   filename='thal-spindle.h5')
     print('Results of the simulation are stored as:', 'thal-spindle.h5')
     print('--> Run \"python thalamic-spindle.py plot\" to plot the results')
