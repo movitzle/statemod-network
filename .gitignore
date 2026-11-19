@@ -218,3 +218,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# optuna studies (journals, logs, figures, cython caches): too large for git
+data/optuna/
