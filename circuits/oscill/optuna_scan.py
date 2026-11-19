@@ -36,13 +36,13 @@ Samplers:
     'tpe' : adaptive, concentrates around the hits. One study shared by all
           workers, in data/optuna/<study>.journal.
 
-    uv run oscill/optuna_scan.py run --hours 10 --workers 36       # qmc study
-    uv run oscill/optuna_scan.py run --trials 2000 --sampler tpe
-    uv run oscill/optuna_scan.py show                 # counts, best hits, ranges
-    uv run oscill/optuna_scan.py summary --save       # -> data/optuna/<study>-summary.png
-    uv run oscill/optuna_scan.py projections --save   # score on 2D subspaces (corner plot)
-    uv run oscill/optuna_scan.py best 3 --save        # V traces of the 3 largest hits
-    uv run oscill/optuna_scan.py trial w03:12         # re-run a trial, plot V
+    uv run circuits/oscill/optuna_scan.py run --hours 10 --workers 36       # qmc study
+    uv run circuits/oscill/optuna_scan.py run --trials 2000 --sampler tpe
+    uv run circuits/oscill/optuna_scan.py show                 # counts, best hits, ranges
+    uv run circuits/oscill/optuna_scan.py summary --save       # -> data/optuna/<study>-summary.png
+    uv run circuits/oscill/optuna_scan.py projections --save   # score on 2D subspaces (corner plot)
+    uv run circuits/oscill/optuna_scan.py best 3 --save        # V traces of the 3 largest hits
+    uv run circuits/oscill/optuna_scan.py trial w03:12         # re-run a trial, plot V
 """
 import sys, os, copy, time, pathlib, argparse, warnings
 
@@ -53,7 +53,7 @@ from scipy.signal import butter, sosfiltfilt, hilbert, welch
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-sys.path.insert(0, str(HERE.parent / 'prelim'))  # snd_utils, used by baseline
+sys.path.insert(0, str(HERE.parents[1] / 'prelim'))  # snd_utils, used by baseline
 
 import optuna
 import brian2 as b2
@@ -69,10 +69,10 @@ from baseline import Model as BASELINE
 TARGET_POPS = ['L5Exc']           # populations that must oscillate
 BAND = (3., 7.)                   # Hz
 AMP_MIN = 8.                      # mV, peak-to-peak (also the score cap)
-RANGE = 4.                        # parameters in [x/RANGE, x*RANGE]
+RANGE = 5.                        # parameters in [x/RANGE, x*RANGE]
 
 # physiological constraints, on all populations
-RATE_MAX = {'TcExc': 20., 'ReInh': 40., 'L5Exc': 20., 'L5Inh': 40.}  # Hz
+RATE_MAX = {'TcExc': 20., 'ReInh': 40., 'L5Exc': 10., 'L5Inh': 20.}  # Hz
 V_FLOOR = -85.                    # mV, 1st percentile of V
 
 TSTOP = 3000*ms
@@ -82,7 +82,7 @@ V_DT = 1*ms                       # sampling of V
 MAX_RATE = 50*Hz                  # stop runaway networks early (infeasible)
 
 STUDY_PREFIX = 'slow-oscill-v2'
-DATA = HERE.parent / 'data' / 'optuna'
+DATA = HERE.parents[1] / 'data' / 'optuna'
 
 
 def study_name(sampler):

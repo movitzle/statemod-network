@@ -41,8 +41,7 @@ Model = {
     },
 
     # independent Poisson drives, rates set below
-    'afferents': {'BgExc': dict(N=100),
-                  'ModExc': dict(N=500)},
+    'afferents': {'BgExc': dict(N=100)},
 
     # fixed indegree (= int(p*N_pre) of the ntwk connection probability p)
     'projections': {
