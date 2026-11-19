@@ -40,6 +40,7 @@ Samplers:
     uv run oscill/optuna_scan.py run --trials 2000 --sampler tpe
     uv run oscill/optuna_scan.py show                 # counts, best hits, ranges
     uv run oscill/optuna_scan.py summary --save       # -> data/optuna/<study>-summary.png
+    uv run oscill/optuna_scan.py projections --save   # score on 2D subspaces (corner plot)
     uv run oscill/optuna_scan.py best 3 --save        # V traces of the 3 largest hits
     uv run oscill/optuna_scan.py trial w03:12         # re-run a trial, plot V
 """
@@ -382,6 +383,8 @@ def load_table(name):
              X=np.array([[t.params[n]/base[n] for n in names] for t in trials]),
              m=M,
              hit=np.array([hit(m) for m in M]),
+             feasible=np.array([feasible(m) for m in M]),
+             score=np.array([m['score'] for m in M]),
              category=np.array([category(m) for m in M]))
     for key in ['amp', 'freq', 'rate', 'vlow']:
         for p in BASELINE['populations']:
@@ -516,6 +519,115 @@ def summary(name, filename=None, max_points=20000):
         plt.show()
 
 
+def influence_order(T, nbins=12):
+    """ parameter indices sorted by influence on P(hit) (max-min across bins) """
+    bins = np.linspace(-np.log(RANGE), np.log(RANGE), nbins+1)
+    P = np.array([_hit_probability(T, k, bins) for k in range(len(T['names']))])
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        return list(np.argsort(-(np.nanmax(P, 1)-np.nanmin(P, 1))))
+
+
+def projections(name, params=None, n=8, nbins=10, feasible_only=True,
+                vmax=None, T=None, filename=None):
+    """
+    projections of the score on all 2D subspaces of the parameters (corner plot)
+
+    lower triangle: mean score in each (param_i, param_j) bin
+    diagonal      : mean score along each parameter (+/- s.e.m.)
+    params        : parameter names (default: the n parameters along which
+                    the mean score varies most)
+    feasible_only : score of the infeasible trials (constraints violated) set
+                    to 0, as they do not count as oscillations
+    vmax          : top of the color scale (default: highest bin mean;
+                    AMP_MIN for the absolute scale)
+    score         : objective function = TARGET_POPS amplitude capped at
+                    AMP_MIN, so the mean score in a bin also reflects the
+                    fraction of trials reaching the target
+    """
+    import matplotlib
+    if filename is not None:
+        matplotlib.use('Agg')
+    import matplotlib.pylab as plt
+    T = load_table(name) if T is None else T
+    score = np.where(T['feasible'], T['score'], 0) if feasible_only else T['score']
+    bins = np.linspace(-np.log(RANGE), np.log(RANGE), nbins+1)
+    L = np.log(T['X'])
+
+    def binned_mean(k):
+        idx = np.clip(np.digitize(L[:, k], bins)-1, 0, nbins-1)
+        n_ = np.bincount(idx, minlength=nbins)
+        return np.bincount(idx, weights=score, minlength=nbins)/np.maximum(n_, 1), n_
+
+    if params:
+        keys = [T['names'].index(p) for p in params]
+    else:  # parameters along which the mean score varies most
+        spread = [np.ptp(binned_mean(k)[0][binned_mean(k)[1] > 0]) for k in range(len(T['names']))]
+        keys = list(np.argsort(spread)[::-1][:n])
+    if vmax is None:  # highest mean over the 2D bins shown
+        vmax = 1e-3
+        for a in range(len(keys)):
+            for b in range(a):
+                H, _, _ = np.histogram2d(L[:, keys[b]], L[:, keys[a]], bins=[bins, bins], weights=score)
+                N, _, _ = np.histogram2d(L[:, keys[b]], L[:, keys[a]], bins=[bins, bins])
+                vmax = max(vmax, np.nanmax(np.where(N > 0, H/np.maximum(N, 1), 0)))
+    ticks = [1/RANGE, 1, RANGE]
+    short = lambda k: T['names'][k].replace('indegree_', 'K ').replace('w_', 'w ').replace('_', '>', 1).replace('_', ' ')
+
+    nk = len(keys)
+    fig, AX = plt.subplots(nk, nk, figsize=(1.6*nk+1.5, 1.6*nk+0.5))
+    AX = np.atleast_2d(AX)
+    for a in range(nk):
+        for b in range(nk):
+            ax = AX[a, b]
+            ka, kb = keys[a], keys[b]
+            if b > a:
+                ax.axis('off')
+                continue
+            if a == b:  # mean score along the parameter
+                idx = np.clip(np.digitize(L[:, ka], bins)-1, 0, nbins-1)
+                n_ = np.bincount(idx, minlength=nbins)
+                m_ = np.bincount(idx, weights=score, minlength=nbins)/np.maximum(n_, 1)
+                s_ = np.sqrt(np.maximum(np.bincount(idx, weights=score**2, minlength=nbins)/np.maximum(n_, 1)-m_**2, 0)/np.maximum(n_, 1))
+                c = (bins[1:]+bins[:-1])/2
+                ax.fill_between(c, m_-s_, m_+s_, color='grey', alpha=0.3, lw=0)
+                ax.plot(c, m_, 'k-', lw=1)
+                ax.set_ylim(0, vmax)
+                ax.yaxis.tick_right()
+                ax.tick_params(labelsize='x-small')
+            else:  # mean score in the (kb, ka) plane
+                H, _, _ = np.histogram2d(L[:, kb], L[:, ka], bins=[bins, bins], weights=score)
+                N, _, _ = np.histogram2d(L[:, kb], L[:, ka], bins=[bins, bins])
+                with np.errstate(invalid='ignore'):
+                    im = ax.imshow((H/N).T, origin='lower', cmap='viridis', vmin=0, vmax=vmax,
+                                   extent=[bins[0], bins[-1], bins[0], bins[-1]], aspect='auto')
+                ax.plot(0, 0, '+', color='w', ms=5, mew=0.8)
+                ax.set_yticks(np.log(ticks), ['x%g' % x for x in ticks] if b == 0 else [])
+                if b == 0:
+                    ax.set_ylabel(short(ka), fontsize='x-small')
+            ax.set_xlim(bins[0], bins[-1])
+            ax.set_xticks(np.log(ticks), ['x%g' % x for x in ticks] if a == nk-1 else [])
+            ax.tick_params(labelsize='x-small')
+            if a == nk-1:
+                ax.set_xlabel(short(kb), fontsize='x-small')
+    fig.subplots_adjust(left=0.08, right=0.94, bottom=0.07, top=0.95,
+                        wspace=0.12, hspace=0.12)
+    # colorbar and title in the empty upper triangle
+    cax = fig.add_axes([0.55, 0.80, 0.35, 0.02])
+    fig.colorbar(im, cax=cax, orientation='horizontal',
+                 label='mean score: %s amplitude (mV), capped at %g%s' % (
+                     '/'.join(TARGET_POPS), AMP_MIN, ',\n0 if infeasible (constraints violated)'
+                     if feasible_only else ''))
+    fig.text(0.55, 0.88, '%s\nscore on the 2D subspaces\n%i trials, +: baseline, white: not sampled'
+             % (name, len(score)), fontsize='medium', va='bottom')
+    if filename is not None:
+        fig.savefig(filename, dpi=120)
+        print('[ok] projections saved as', filename)
+    else:
+        plt.show()
+    return fig, AX
+
+
 def best_hits(name, n=5):
     """ trial ids of the n hits with the largest amplitude """
     T = load_table(name)
@@ -555,7 +667,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawTextHelpFormatter)
-    parser.add_argument('action', choices=['run', 'show', 'summary', 'trial', 'best'])
+    parser.add_argument('action', choices=['run', 'show', 'summary', 'projections', 'trial', 'best'])
     parser.add_argument('id', nargs='?', default=None,
                         help='trial id (for "trial", e.g. w03:120), number of hits (for "best")')
     parser.add_argument('--sampler', choices=['qmc', 'tpe'], default='qmc')
@@ -577,6 +689,8 @@ if __name__ == '__main__':
         show(name)
     elif args.action == 'summary':
         summary(name, fig('summary'))
+    elif args.action == 'projections':
+        projections(name, filename=fig('projections'))
     elif args.action == 'best':
         for i in best_hits(name, int(args.id or 3)):
             plot_trial(name, i, fig('trial-%s' % i.replace(':', '-')))
